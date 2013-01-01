@@ -273,6 +273,16 @@ int is_wifi_driver_loaded() {
 
 int wifi_load_driver()
 {
+#ifdef WIFI_DRIVER_LOADER_REUSE
+    // C3C0: don't load driver if already loaded
+    // this will avoid doing rmmod/insmod cycle when driver module already loaded
+    if(is_wifi_driver_loaded())
+    {
+        property_set(DRIVER_PROP_NAME, "ok");
+        return 0;
+    }
+#endif
+
 #ifdef WIFI_DRIVER_MODULE_PATH
     char driver_status[PROPERTY_VALUE_MAX];
     int count = 100; /* wait at most 20 seconds for completion */
