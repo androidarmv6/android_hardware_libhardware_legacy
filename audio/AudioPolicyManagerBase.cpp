@@ -88,6 +88,25 @@ status_t AudioPolicyManagerBase::setDeviceConnectionState(audio_devices_t device
             }
             ALOGV("setDeviceConnectionState() connecting device %x", device);
 
+#ifdef HAVE_FM_RADIO
+
+        ALOGE("*******setDeviceConnectionState() fmmmmmm: %x", device);
+        ALOGE("******* IS EQUAL??????????????: %x", AudioSystem::DEVICE_OUT_FM);
+
+        if (device == (audio_devices_t)AudioSystem::DEVICE_OUT_FM) {
+
+
+            AudioOutputDescriptor *out = mOutputs.valueFor(mPrimaryOutput);
+
+            ALOGE("*******setDeviceConnectionState() COME HERE: %x", out->mRefCount[AudioSystem::FM]);
+
+            if (out->mRefCount[AudioSystem::FM] <= 0) {
+                mpClientInterface->setParameters(0, String8("fm_on=1"));
+                out->mRefCount[AudioSystem::FM] = 1;
+            }
+        }
+#endif
+
             if (checkOutputsForDevice(device, state, outputs) != NO_ERROR) {
                 return INVALID_OPERATION;
             }
@@ -124,6 +143,20 @@ status_t AudioPolicyManagerBase::setDeviceConnectionState(audio_devices_t device
             break;
         // handle output device disconnection
         case AudioSystem::DEVICE_STATE_UNAVAILABLE: {
+
+#ifdef HAVE_FM_RADIO
+        if (device == (audio_devices_t)AudioSystem::DEVICE_OUT_FM) {
+
+            AudioOutputDescriptor *out = mOutputs.valueFor(mPrimaryOutput);
+ALOGE("*******setDeviceConnectionState() COME HERE UNAVAILABLE: %x", out->mRefCount[AudioSystem::FM]);
+
+            if (out->mRefCount[AudioSystem::FM] > 0) {
+                mpClientInterface->setParameters(0, String8("fm_off=1"));
+                out->mRefCount[AudioSystem::FM] = 0;
+            }
+        }
+#endif
+
             if (!(mAvailableOutputDevices & device)) {
                 ALOGW("setDeviceConnectionState() device not connected: %x", device);
                 return INVALID_OPERATION;
@@ -153,7 +186,23 @@ status_t AudioPolicyManagerBase::setDeviceConnectionState(audio_devices_t device
             ALOGE("setDeviceConnectionState() invalid state: %x", state);
             return BAD_VALUE;
         }
-
+/*
+#ifdef HAVE_FM_RADIO
+        if (device == AudioSystem::DEVICE_OUT_FM) {
+            AudioOutputDescriptor *out = mOutputs.valueFor(mPrimaryOutput);
+            if (state == AudioSystem::DEVICE_STATE_AVAILABLE) {
+                out->changeRefCount(AudioSystem::FM, 1);
+                if (out->mRefCount[AudioSystem::FM] > 0)
+                    mpClientInterface->setParameters(0, String8("fm_on=1"));
+            }
+            else {
+                out->changeRefCount(AudioSystem::FM, -1);
+                if (out->mRefCount[AudioSystem::FM] <= 0)
+                    mpClientInterface->setParameters(0, String8("fm_off=1"));
+            }
+        }
+#endif
+*/
         checkA2dpSuspend();
         checkOutputForAllStrategies();
         // outputs must be closed after checkOutputForAllStrategies() is executed
@@ -407,11 +456,17 @@ void AudioPolicyManagerBase::setForceUse(AudioSystem::force_use usage, AudioSyst
             config != AudioSystem::FORCE_WIRED_ACCESSORY &&
             config != AudioSystem::FORCE_ANALOG_DOCK &&
             config != AudioSystem::FORCE_DIGITAL_DOCK && config != AudioSystem::FORCE_NONE &&
-            config != AudioSystem::FORCE_NO_BT_A2DP) {
+            config != AudioSystem::FORCE_NO_BT_A2DP &&
+            config != AudioSystem::FORCE_SPEAKER) {
             ALOGW("setForceUse() invalid config %d for FOR_MEDIA", config);
             return;
         }
         mForceUse[usage] = config;
+        {
+            uint32_t device = getDeviceForStrategy(STRATEGY_MEDIA, false);
+            setOutputDevice(mPrimaryOutput, device);
+        }
+
         break;
     case AudioSystem::FOR_RECORD:
         if (config != AudioSystem::FORCE_BT_SCO && config != AudioSystem::FORCE_WIRED_ACCESSORY &&
@@ -1188,6 +1243,11 @@ bool AudioPolicyManagerBase::isStreamActive(int stream, uint32_t inPastMs) const
             return true;
         }
     }
+#ifdef HAVE_FM_RADIO
+    if (stream == AudioSystem::MUSIC && (mAvailableOutputDevices & AudioSystem::DEVICE_OUT_FM)) {
+        return true;
+    }
+#endif
     return false;
 }
 
