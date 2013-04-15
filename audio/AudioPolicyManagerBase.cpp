@@ -128,7 +128,18 @@ status_t AudioPolicyManagerBase::setDeviceConnectionState(audio_devices_t device
                 ALOGW("setDeviceConnectionState() device not connected: %x", device);
                 return INVALID_OPERATION;
             }
-
+#ifdef HAVE_FM_RADIO
+            if(device == AudioSystem::DEVICE_OUT_FM){
+                ALOGD("turning off Fm device");
+                uint32_t newDevice = getDeviceForStrategy(STRATEGY_MEDIA, false);
+                if(((newDevice & AudioSystem::DEVICE_OUT_BLUETOOTH_A2DP) ||
+                   (newDevice & AudioSystem::DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES)||
+                   (newDevice & AudioSystem::DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER))) {
+                    ALOGW("setDeviceConnectionState() FM off, switch to Wired Headset");
+                    setOutputDevice(mPrimaryOutput, AudioSystem::DEVICE_OUT_WIRED_HEADSET, true);
+                }
+            }
+#endif
             ALOGV("setDeviceConnectionState() disconnecting device %x", device);
             // remove device from available output devices
             mAvailableOutputDevices = (audio_devices_t)(mAvailableOutputDevices & ~device);
@@ -153,6 +164,27 @@ status_t AudioPolicyManagerBase::setDeviceConnectionState(audio_devices_t device
             ALOGE("setDeviceConnectionState() invalid state: %x", state);
             return BAD_VALUE;
         }
+
+#ifdef HAVE_FM_RADIO
+        // request routing change if necessary
+        uint32_t newDevice = getNewDevice(mPrimaryOutput, false);
+        if (device == AudioSystem::DEVICE_OUT_FM) {
+            AudioOutputDescriptor *out = mOutputs.valueFor(mPrimaryOutput);
+            if (state == AudioSystem::DEVICE_STATE_AVAILABLE) {
+                out->changeRefCount(AudioSystem::FM, 1);
+                if (out->mRefCount[AudioSystem::FM] > 0)
+                    mpClientInterface->setParameters(0, String8("fm_on=1"));
+            }
+            else {
+                out->changeRefCount(AudioSystem::FM, -1);
+                if (out->mRefCount[AudioSystem::FM] <= 0)
+                    mpClientInterface->setParameters(0, String8("fm_off=1"));
+            }
+            if (newDevice == 0) {
+                newDevice = getDeviceForStrategy(STRATEGY_MEDIA, false);
+            }
+        }
+#endif
 
         checkA2dpSuspend();
         checkOutputForAllStrategies();
@@ -1188,6 +1220,11 @@ bool AudioPolicyManagerBase::isStreamActive(int stream, uint32_t inPastMs) const
             return true;
         }
     }
+
+    if (stream == AudioSystem::MUSIC && (mAvailableOutputDevices & AudioSystem::DEVICE_OUT_FM)) {
+        return true;
+    }
+
     return false;
 }
 
