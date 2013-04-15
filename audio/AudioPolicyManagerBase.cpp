@@ -124,6 +124,20 @@ status_t AudioPolicyManagerBase::setDeviceConnectionState(audio_devices_t device
             break;
         // handle output device disconnection
         case AudioSystem::DEVICE_STATE_UNAVAILABLE: {
+
+#ifdef HAVE_FM_RADIO
+            if(device == AudioSystem::DEVICE_OUT_FM){
+                ALOGD("turning off Fm device");
+                uint32_t newDevice = getDeviceForStrategy(STRATEGY_MEDIA, false);
+                if(((newDevice & AudioSystem::DEVICE_OUT_BLUETOOTH_A2DP) ||
+                   (newDevice & AudioSystem::DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES)||
+                   (newDevice & AudioSystem::DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER))) {
+                    ALOGW("setDeviceConnectionState() FM off, switch to Wired Headset");
+                    setOutputDevice(mPrimaryOutput, AudioSystem::DEVICE_OUT_WIRED_HEADSET, true);
+                }
+            }
+#endif
+
             if (!(mAvailableOutputDevices & device)) {
                 ALOGW("setDeviceConnectionState() device not connected: %x", device);
                 return INVALID_OPERATION;
@@ -154,8 +168,29 @@ status_t AudioPolicyManagerBase::setDeviceConnectionState(audio_devices_t device
             return BAD_VALUE;
         }
 
+        // request routing change if necessary
+        uint32_t newDevice = getNewDevice(mPrimaryOutput, false);
+#ifdef HAVE_FM_RADIO
+        if (device == AudioSystem::DEVICE_OUT_FM) {
+            AudioOutputDescriptor *out = mOutputs.valueFor(mPrimaryOutput);
+            if (state == AudioSystem::DEVICE_STATE_AVAILABLE) {
+                out->changeRefCount(AudioSystem::FM, 1);
+                if (out->mRefCount[AudioSystem::FM] > 0)
+                    mpClientInterface->setParameters(0, String8("fm_on=1"));
+            }
+            else {
+                out->changeRefCount(AudioSystem::FM, -1);
+                if (out->mRefCount[AudioSystem::FM] <= 0)
+                    mpClientInterface->setParameters(0, String8("fm_off=1"));
+            }
+            if (newDevice == 0) {
+                newDevice = getDeviceForStrategy(STRATEGY_MEDIA, false);
+            }
+        }
+#endif
         checkA2dpSuspend();
         checkOutputForAllStrategies();
+        setOutputDevice(mPrimaryOutput, newDevice);
         // outputs must be closed after checkOutputForAllStrategies() is executed
         if (!outputs.isEmpty()) {
             for (size_t i = 0; i < outputs.size(); i++) {
@@ -407,11 +442,17 @@ void AudioPolicyManagerBase::setForceUse(AudioSystem::force_use usage, AudioSyst
             config != AudioSystem::FORCE_WIRED_ACCESSORY &&
             config != AudioSystem::FORCE_ANALOG_DOCK &&
             config != AudioSystem::FORCE_DIGITAL_DOCK && config != AudioSystem::FORCE_NONE &&
-            config != AudioSystem::FORCE_NO_BT_A2DP) {
+            config != AudioSystem::FORCE_NO_BT_A2DP &&
+            config != AudioSystem::FORCE_SPEAKER) {
             ALOGW("setForceUse() invalid config %d for FOR_MEDIA", config);
             return;
         }
         mForceUse[usage] = config;
+        {
+            uint32_t device = getDeviceForStrategy(STRATEGY_MEDIA, false);
+            setOutputDevice(mPrimaryOutput, device);
+        }
+
         break;
     case AudioSystem::FOR_RECORD:
         if (config != AudioSystem::FORCE_BT_SCO && config != AudioSystem::FORCE_WIRED_ACCESSORY &&
@@ -1188,6 +1229,11 @@ bool AudioPolicyManagerBase::isStreamActive(int stream, uint32_t inPastMs) const
             return true;
         }
     }
+#ifdef HAVE_FM_RADIO
+    if (stream == AudioSystem::MUSIC && (mAvailableOutputDevices & AudioSystem::DEVICE_OUT_FM)) {
+        return true;
+    }
+#endif
     return false;
 }
 
